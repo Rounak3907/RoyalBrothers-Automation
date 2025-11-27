@@ -4,6 +4,8 @@ import com.microsoft.playwright.Page;
 import io.cucumber.java.en.*;
 import pages.RoyalBrothersPage;
 import utils.PlaywrightFactory;
+import static org.assertj.core.api.Assertions.assertThat;
+
 
 public class RoyalBrothersSteps {
     Page page;
@@ -54,4 +56,21 @@ public class RoyalBrothersSteps {
         rb.printBikeData();
         PlaywrightFactory.closeBrowser();
     }
+
+    @Then("an error message should be shown for invalid date selection")
+    public void validateInvalidDateMessage() {
+        String error = page.locator(".error-message").innerText();
+        assertThat(error).contains("Drop-off date cannot be earlier than pickup");
+    }
+    @Then("no location results should be displayed")
+    public void validateNoLocationResults() {
+        int count = page.locator(".location_listing .location").count();
+        assertThat(count).isEqualTo(0);
+    }
+    @Then("an Timeout error message should appear.")
+    public void validateCityRequiredMessage(String msg) {
+        String toast = page.locator(".toast").innerText();
+        assertThat(toast).contains(msg);
+    }
+
 }

@@ -52,51 +52,63 @@ public class RoyalBrothersPage {
         selectTime("#dropoff-time-other",drop);
     }
 
-private void selectDate(String dateFieldSelector, String dateValue) {
-    // Extracting date
-    LocalDate date = LocalDate.parse(dateValue.split(" ")[0]);
-    String day = String.valueOf(date.getDayOfMonth());
-    int targetMonth = date.getMonthValue();
-    int targetYear = date.getYear();
-    // Determining picker root dynamically
-    String rootId = dateFieldSelector.replace("#", "") + "_root";
-    String rootSelector = "#" + rootId;
-    Locator pickerRoot = page.locator(rootSelector);
-    // Ensuring picker is open (only click if needed)
-    if (!pickerRoot.locator("div.picker--opened").isVisible()) {
-        page.click(dateFieldSelector);
-        page.waitForTimeout(300);
-    }
-    //Now strictly working inside this picker
-    Locator headerMonth = pickerRoot.locator(".picker__month");
-    Locator headerYear  = pickerRoot.locator(".picker__year");
-    headerMonth.waitFor(new Locator.WaitForOptions().setTimeout(5000));
-    Locator nextBtn = pickerRoot.locator(".picker__nav--next");
-    Locator prevBtn = pickerRoot.locator(".picker__nav--prev");
-    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH);
-    //Month Navigation Loop
-    while (true) {
-        String currentMonthName = headerMonth.innerText().trim();
-        String currentYearText  = headerYear.innerText().trim();
-        int currentMonth = Month.from(formatter.parse(currentMonthName)).getValue();
-        int currentYear  = Integer.parseInt(currentYearText);
-        if (currentMonth == targetMonth && currentYear == targetYear) break;
-        if (currentYear < targetYear || (currentYear == targetYear && currentMonth < targetMonth)) {
-            nextBtn.click();
-        } else {
-            prevBtn.click();
+    private void selectDate(String dateFieldSelector, String dateValue) {
+        LocalDate date = LocalDate.parse(dateValue.split(" ")[0]);
+        String day = String.valueOf(date.getDayOfMonth());
+        int targetMonth = date.getMonthValue();
+        int targetYear = date.getYear();
+        String rootSelector = "#" + dateFieldSelector.replace("#", "") + "_root";
+        Locator pickerRoot = page.locator(rootSelector);
+        if (!pickerRoot.locator(".picker--opened").isVisible()) {
+            page.click(dateFieldSelector);
+            page.waitForTimeout(300);
         }
+        Locator headerMonth = pickerRoot.locator(".picker__month");
+        Locator headerYear  = pickerRoot.locator(".picker__year");
+        headerMonth.waitFor();
+        Locator nextBtn = pickerRoot.locator(".picker__nav--next");
+        Locator prevBtn = pickerRoot.locator(".picker__nav--prev");
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH);
+        // --- Month Loop ---
+        while (true) {
+            int currentMonth = Month.from(fmt.parse(headerMonth.innerText().trim())).getValue();
+            int currentYear  = Integer.parseInt(headerYear.innerText().trim());
+
+            if (currentMonth == targetMonth && currentYear == targetYear) break;
+
+            if (currentYear < targetYear || (currentYear == targetYear && currentMonth < targetMonth))
+                nextBtn.click();
+            else
+                prevBtn.click();
+
+            page.waitForTimeout(200);
+        }
+        //First checking whether the date cell exists ---
+        Locator possibleCells = pickerRoot.locator(
+                ".picker__day:not(.picker__day--outfocus)"
+        ).filter(new Locator.FilterOptions().setHasText(day));
+        int count = possibleCells.count();
+        System.out.println(count);
+        if (count == 0) {
+            throw new AssertionError(
+                    "\n❌ INVALID DATE: '" + day + "' does not exist in the visible calendar DOM.\n" +
+                            "This usually means the site blocked navigation to this invalid date.\n"
+            );
+        }
+        Locator rawCell = possibleCells.first();
+        //Checking if disabled ---
+        boolean isDisabled =(Boolean) rawCell.evaluate("el => el.classList.contains('picker__day--disabled')");
+        if (isDisabled) {
+            throw new AssertionError(
+                    "\n❌ INVALID DATE SELECTION\n" +
+                            "Date attempted: " + dateValue + "\n" +
+                            "Drop-off date cannot be earlier than pickup\n"
+            );
+        }
+        rawCell.click();
         page.waitForTimeout(200);
     }
-    //Selecting the target day
-    Locator dayLocator = pickerRoot.locator(
-            ".picker__day:not(.picker__day--disabled)"
-    ).filter(new Locator.FilterOptions().setHasText(day));
-    dayLocator.first().scrollIntoViewIfNeeded();
-    page.waitForTimeout(200);
-    dayLocator.first().click();
-    page.waitForTimeout(300);
-}
+
 
     private void selectTime(String timeFieldSelector, String dateValue) {
         String time = dateValue.split(" ")[1];
@@ -166,6 +178,7 @@ private void selectDate(String dateFieldSelector, String dateValue) {
     }
 
     public void applyLocationFilter(String location) {
+
         String searchKeyword = location.split(" ")[0];
         // Finding all location listings and picking the visible one (desktop)
         Locator visibleLocationList = page.locator(".location_listing")
@@ -173,26 +186,43 @@ private void selectDate(String dateFieldSelector, String dateValue) {
                 .filter(new Locator.FilterOptions().setHasNotText("Location Search"))
                 .first();
         visibleLocationList.waitFor(new Locator.WaitForOptions().setTimeout(8000));
-        //Findinf the correct search box (avoiding mobile duplicate)
+        // Correct search input (avoid mobile duplicate)
         Locator searchInput = page.locator("input.location_input")
                 .filter(new Locator.FilterOptions().setHasNotText("pickup"))
                 .first();
         searchInput.click();
         searchInput.fill("");
         page.waitForTimeout(300);
-        //Typing (not filling) to trigger JS search filtering
+        // Type slowly to trigger JS filtering
         searchInput.pressSequentially(searchKeyword,
                 new Locator.PressSequentiallyOptions().setDelay(120));
-        page.waitForTimeout(1000);
-        //Selecting the matching visible label
-        Locator matchingLabel = visibleLocationList.locator("label")
+        page.waitForTimeout(800);
+        // Count after filtering
+        Locator allFilteredResults = visibleLocationList.locator("label");
+        int resultCount = allFilteredResults.count();
+        System.out.println("Filtered results found: " + resultCount);
+        // NEGATIVE SCENARIO HANDLING
+        if (resultCount == 0) {
+            System.out.println("⚠ No matching location found for: " + location);
+            return;
+        }
+        // POSITIVE SCENARIO: Find exact match
+        Locator matchingLabel = allFilteredResults
                 .filter(new Locator.FilterOptions().setHasText(location))
                 .first();
+        if (matchingLabel.count() == 0) {
+            // Exists results, but NOT exact match, still negative
+            throw new AssertionError("\n❌ [NO EXACT LOCATION FOUND]");
+        }
+
         matchingLabel.scrollIntoViewIfNeeded();
         matchingLabel.click();
+
         System.out.println("Location filter applied Successfully ✔ : " + location);
+
         page.waitForTimeout(1000);
     }
+
 
     public void validateBikeLocation(String expectedFullLocation) {
         System.out.println("\nVALIDATING DATA FOR FILTERED LOCATION MATCH: " + expectedFullLocation + "\n");
@@ -232,6 +262,7 @@ private void selectDate(String dateFieldSelector, String dateValue) {
             // Closing dropdown after validation
             card.locator(".dropdown-header").click();
         }
+        // ASSERTION ADDED
         if (matched == 0) {
             throw new AssertionError("\n❌ [NO BIKES MATCH THE SELECTED LOCATION]\nExpected location: "
                     + expectedFullLocation + "\nBut found 0 valid results.\n");
@@ -241,6 +272,7 @@ private void selectDate(String dateFieldSelector, String dateValue) {
         System.out.println("✔ Matching bikes: " + matched);
         System.out.println("❌ Not matching: " + notMatched);
         System.out.println("⚠ Sold Out: " + soldOut);
+
     }
     public void printBikeData() {
         System.out.println("Vehicle record : \n");
